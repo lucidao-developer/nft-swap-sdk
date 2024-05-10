@@ -12,8 +12,6 @@ tl;dr: NFT Swap SDK is the easiest, most-powerful swap library available on the 
 
 The NFT Swap SDK developed by [Trader.xyz](https://trader.xyz) offers swap support for ERC20s, ERC721s, and ERC1155s. Exchange NFTs for NFTs, NFTs for ERC20 tokens, or bundles of NFTs and tokens. This library provides the ultimate swap flexibility combined with a simple API surface area so you can be productive immediately and focus on building your web3 app.
 
-This library is powered and secured by the [0x v3 protocol](https://0x.org). The 0x v3 protocol has been in production for multiple years securing billions of dollars with of trades.
-
 ### Goals
 
 We want to share all underlying technology trader.xyz uses with the community. While we won't be open-sourcing our frontend, as we think design and UX is our differentiator, we believe in open-sourcing and freely sharing all underlying technology.
@@ -264,18 +262,13 @@ const App = () => {
   - Binance Smart Chain (56)
   - Avalanche (43114)
 
-- What protocol does this library use?
 
-  - trader.xyz and trader.xyz libraries are powered by 0x v3 Protocol. This protocol is mature and lindy, and has been extremely well-audited.
-  - Check out the 0x v3 spec [here](https://github.com/0xProject/0x-protocol-specification/blob/master/v3/v3-specification.md)
-  - Check out the 0x v3 Consensys audit [here](https://consensys.net/diligence/audits/2019/09/0x-v3-exchange/)
 
 - Are there any protocol fees to execute swaps?
 
   - No
 
 - How do I get the user's `signer` object?
-
   - Generally you can get it from the user's web3 wallet provider, by something like this: `provider.getSigner()`.
   - See this [ethers guide](https://docs.ethers.io/v4/cookbook-providers.html#metamask) (control-f for `getSigner`).
   - In web3-react you can do:
