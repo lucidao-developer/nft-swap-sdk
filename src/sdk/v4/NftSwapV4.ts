@@ -78,7 +78,7 @@ export enum SupportedChainIdsV4 {
   Ubiq = 8,
   Ganache = 1337,
   Polygon = 137,
-  PolygonMumbai = 80001,
+  PolygonAmoy = 80002,
   BSC = 56,
   Optimism = 10,
   Fantom = 250,
@@ -91,7 +91,7 @@ export enum SupportedChainIdsV4 {
 
 export const SupportedChainsForV4OrderbookStatusMonitoring = [
   SupportedChainIdsV4.Polygon,
-  SupportedChainIdsV4.PolygonMumbai,
+  SupportedChainIdsV4.PolygonAmoy,
   SupportedChainIdsV4.Mainnet,
   SupportedChainIdsV4.Optimism,
   SupportedChainIdsV4.Goerli,

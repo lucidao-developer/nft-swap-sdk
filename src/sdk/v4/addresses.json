@@ -51,9 +51,9 @@
     "exchange": "0xdef1c0ded9bec7f1a1670819833240f027b25eff",
     "wrappedNativeToken": "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270"
   },
-  "80001": {
-    "exchange": "0x4fb72262344034e034fce3d9c701fd9213a55260",
-    "wrappedNativeToken": "0x9c3c9283d3e44854697cd22d3faa240cfb032889"
+  "80002": {
+    "exchange": "0xc6ed17457a675cdcb38077a427ffe904728d6a45",
+    "wrappedNativeToken": "0x01805a841ece00cf680996bf4b4e21746c68fd4e"
   },
   "43114": {
     "exchange": "0xdef1c0ded9bec7f1a1670819833240f027b25eff",

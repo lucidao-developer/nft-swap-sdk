@@ -16,7 +16,7 @@ const MAKER_PRIVATE_KEY =
 const DAI_TOKEN_ADDRESS_TESTNET = '0x001b3b4d0f3714ca98ba10f6042daebf0b1b7b6f'; // https://mumbai.polygonscan.com/token/0x001b3b4d0f3714ca98ba10f6042daebf0b1b7b6f?a=0xabc23F70Df4F45dD3Df4EC6DA6827CB05853eC9b
 const TEST_NFT_CONTRACT_ADDRESS = '0xf5de760f2e916647fd766b4ad9e85ff943ce3a2b'; // https://mumbai.polygonscan.com/token/0xf5de760f2e916647fd766b4ad9e85ff943ce3a2b?a=0xabc23F70Df4F45dD3Df4EC6DA6827CB05853eC9b
 const RPC_TESTNET =
-  'https://polygon-mumbai.g.alchemy.com/v2/VMBpFqjMYv2w-MWnc9df92w3R2TpMvSG';
+  'https://polygon-amoy.g.alchemy.com/v2/lV20qf6d4tV-mkDjHKHazSv8gpWOkjR_';
 
 const MAKER_WALLET = new ethers.Wallet(MAKER_PRIVATE_KEY);
 // const TAKER_WALLET = new ethers.Wallet(TAKER_PRIVATE_KEY);
@@ -26,12 +26,12 @@ const PROVIDER = new ethers.providers.StaticJsonRpcProvider(RPC_TESTNET);
 const MAKER_SIGNER = MAKER_WALLET.connect(PROVIDER);
 // const TAKER_PROVIDER = TAKER_WALLET.connect(PROVIDER);
 
-const POLYGON_MUMBAI_CHAIN_ID = SupportedChainIdsV4.PolygonMumbai;
+const POLYGON_AMOY_CHAIN_ID = SupportedChainIdsV4.PolygonAmoy;
 
 const nftSwapperMaker = new NftSwapV4(
   MAKER_SIGNER as any,
   MAKER_SIGNER,
-  POLYGON_MUMBAI_CHAIN_ID
+  POLYGON_AMOY_CHAIN_ID
 );
 // const nftSwapperTaker = new NftSwap(TAKER_PROVIDER as any, 4);
 
@@ -47,7 +47,7 @@ const MAKER_ASSET: SwappableAssetV4 = {
 };
 
 describe('NFTSwapV4', () => {
-  it('mumbai e2e test', async () => {
+  it('amoy e2e test', async () => {
     // NOTE(johnrjj) - Assumes USDC and DAI are already approved w/ the ExchangeProxy
 
     const v4Erc721Order = nftSwapperMaker.buildOrder(
@@ -94,7 +94,7 @@ describe('NFTSwapV4', () => {
 
     expect(signedOrderErc1155.direction.toString()).toBe('0');
 
-    // await nftSwapperMaker.postOrder(signedOrder, SupportedChainIdsV4.PolygonMumbai);
+    // await nftSwapperMaker.postOrder(signedOrder, SupportedChainIdsV4.PolygonAmoy);
 
     // const maybeOrders = await nftSwapperMaker.getOrders({
     //   nonce: signedOrder.nonce.toString(10),
@@ -116,6 +116,6 @@ describe('NFTSwapV4', () => {
 
     // expect(txReceipt.transactionHash).toBeTruthy();
 
-    // console.log(`Swapped on Polygon Mumbai (txHash: ${txReceipt.transactionHash})`);
+    // console.log(`Swapped on Polygon Amoy (txHash: ${txReceipt.transactionHash})`);
   });
 });
