@@ -420,7 +420,7 @@ export const generateErc721Order = (
     expiry: expiry,
     nonce:
       orderData.nonce?.toString() ??
-      generateRandomV4OrderNonce(orderData.appId),
+      generateRandomV4OrderNonce(),
     taker: orderData.taker?.toLowerCase() ?? NULL_ADDRESS,
   };
 
@@ -470,7 +470,7 @@ export const generateErc1155Order = (
     expiry: expiry,
     nonce:
       orderData.nonce?.toString() ??
-      generateRandomV4OrderNonce(orderData.appId),
+      generateRandomV4OrderNonce(),
     taker: orderData.taker?.toLowerCase() ?? NULL_ADDRESS,
   };
 
@@ -509,27 +509,22 @@ export const verifyAppIdOrThrow = (appId: string) => {
 /**
  * Generates a 256bit nonce.
  * The format:
- *   First 128bits:  ${SDK_PREFIX}${APP_ID}000000 (right padded zeroes to fill)
+ *   First 128bits:  ${SDK_PREFIX}${UNIX_TIMESTAMP}00 (right padded zeroes to fill)
  *   Second 128bits: ${RANDOM_GENERATED_128BIT_ORDER_HASH}
  * @returns 128bit nonce as string (0x orders can handle up to 256 bit nonce)
  */
-export const generateRandomV4OrderNonce = (
-  appId: string = DEFAULT_APP_ID
-): string => {
-  if (appId) {
-    verifyAppIdOrThrow(appId);
-  }
+export const generateRandomV4OrderNonce = (): string => {
   const order128 = padStart(
     generateRandom128BitNumber(),
     ONE_TWENTY_EIGHT_BIT_LENGTH,
     '0'
   );
-  const appId128 = padEnd(
-    `${RESERVED_APP_ID_PREFIX}${appId}`,
+  const sdkPrefixWithOrderTimestamp = padEnd(
+    `${RESERVED_APP_ID_PREFIX}${Math.round(Date.now() / 1000)}`,
     ONE_TWENTY_EIGHT_BIT_LENGTH,
     '0'
   );
-  const final256BitNonce = `${appId128}${order128}`;
+  const final256BitNonce = `${sdkPrefixWithOrderTimestamp}${order128}`;
   invariant(
     final256BitNonce.length <= TWO_FIFTY_SIX_BIT_LENGTH,
     'Invalid nonce size'
