@@ -110,7 +110,7 @@ export interface INftSwapV4 extends BaseNftSwap {
     sellOrBuyNft: 'sell' | 'buy',
     makerAddress: string,
     userConfig?: Partial<OrderStructOptionsCommonStrict>
-  ) => NftOrderV4Serialized;
+  ) => Promise<NftOrderV4Serialized>;
   loadApprovalStatus: (
     asset: SwappableAssetV4,
     walletAddress: string,
@@ -494,25 +494,25 @@ class NftSwapV4 implements INftSwapV4 {
     takerAsset: UserFacingERC20AssetDataSerializedV4,
     makerAddress: string,
     orderConfig?: Partial<OrderStructOptionsCommonStrict>
-  ): NftOrderV4Serialized;
+  ): Promise<NftOrderV4Serialized>;
   buildOrder(
     makerAsset: UserFacingERC20AssetDataSerializedV4,
     takerAsset: UserFacingERC1155AssetDataSerializedV4,
     makerAddress: string,
     orderConfig?: Partial<OrderStructOptionsCommonStrict>
-  ): NftOrderV4Serialized;
+  ): Promise<NftOrderV4Serialized>;
   buildOrder(
     makerAsset: UserFacingERC721AssetDataSerializedV4,
     takerAsset: UserFacingERC20AssetDataSerializedV4,
     makerAddress: string,
     orderConfig?: Partial<OrderStructOptionsCommonStrict>
-  ): NftOrderV4Serialized;
+  ): Promise<NftOrderV4Serialized>;
   buildOrder(
     makerAsset: UserFacingERC20AssetDataSerializedV4,
     takerAsset: UserFacingERC721AssetDataSerializedV4,
     makerAddress: string,
     orderConfig?: Partial<OrderStructOptionsCommonStrict>
-  ): NftOrderV4Serialized;
+  ): Promise<NftOrderV4Serialized>;
   buildOrder(
     makerAsset: SwappableAssetV4,
     takerAsset: SwappableAssetV4,
@@ -565,14 +565,14 @@ class NftSwapV4 implements INftSwapV4 {
     return getWrappedNativeToken(chainId);
   };
 
-  buildCollectionBasedOrder = (
+  buildCollectionBasedOrder = async (
     erc20ToSell: UserFacingERC20AssetDataSerializedV4,
     nftCollectionToBid: {
       tokenAddress: string;
       type: 'ERC721' | 'ERC1155';
     },
     makerAddress: string
-  ): NftOrderV4Serialized => {
+  ): Promise<NftOrderV4Serialized> => {
     return this.buildNftAndErc20Order(
       {
         ...nftCollectionToBid,
@@ -589,13 +589,13 @@ class NftSwapV4 implements INftSwapV4 {
     );
   };
 
-  buildNftAndErc20Order = (
+  buildNftAndErc20Order = async (
     nft: SwappableAssetV4,
     erc20: UserFacingERC20AssetDataSerializedV4,
     sellOrBuyNft: 'sell' | 'buy' = 'sell',
     makerAddress: string,
     userConfig?: Partial<OrderStructOptionsCommonStrict>
-  ): NftOrderV4Serialized => {
+  ): Promise<NftOrderV4Serialized> => {
     const defaultConfig = {
       chainId: this.chainId,
       makerAddress: makerAddress,
@@ -618,7 +618,7 @@ class NftSwapV4 implements INftSwapV4 {
     switch (nft.type) {
       // Build ERC721 order
       case 'ERC721':
-        const erc721Order = generateErc721Order(nft, erc20, {
+        const erc721Order = await generateErc721Order(nft, erc20, {
           direction,
           maker: makerAddress,
           ...config,
@@ -626,7 +626,7 @@ class NftSwapV4 implements INftSwapV4 {
         return erc721Order;
       // Build ERC1155 order
       case 'ERC1155':
-        const erc1155Order = generateErc1155Order(nft, erc20, {
+        const erc1155Order = await generateErc1155Order(nft, erc20, {
           direction,
           maker: makerAddress,
           ...config,

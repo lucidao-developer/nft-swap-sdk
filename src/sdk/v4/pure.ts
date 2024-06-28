@@ -378,11 +378,11 @@ export function parseRawSignature(rawSignature: string): ECSignature {
 
 export const INFINITE_EXPIRATION_TIMESTAMP_SEC = BigNumber.from(2524604400);
 
-export const generateErc721Order = (
+export const generateErc721Order = async ( 
   nft: UserFacingERC721AssetDataSerializedV4,
   erc20: UserFacingERC20AssetDataSerializedV4,
   orderData: Partial<OrderStructOptionsCommon> & OrderStructOptionsCommonStrict
-): ERC721OrderStructSerialized => {
+): Promise<ERC721OrderStructSerialized> => {
   let expiry = INFINITE_EXPIRATION_TIMESTAMP_SEC.toString();
   if (orderData.expiry) {
     // If number or string is provided, assume given as unix timestamp
@@ -420,18 +420,18 @@ export const generateErc721Order = (
     expiry: expiry,
     nonce:
       orderData.nonce?.toString() ??
-      generateRandomV4OrderNonce(),
+      await generateRandomV4OrderNonce(),
     taker: orderData.taker?.toLowerCase() ?? NULL_ADDRESS,
   };
 
   return erc721Order;
 };
 
-export const generateErc1155Order = (
+export const generateErc1155Order = async (
   nft: UserFacingERC1155AssetDataSerializedV4,
   erc20: UserFacingERC20AssetDataSerializedV4,
   orderData: Partial<OrderStructOptionsCommon> & OrderStructOptionsCommonStrict
-): ERC1155OrderStructSerialized => {
+): Promise<ERC1155OrderStructSerialized> => {
   let expiry = INFINITE_EXPIRATION_TIMESTAMP_SEC.toString();
   if (orderData.expiry) {
     // If number or string is provided, assume given as unix timestamp
@@ -470,7 +470,7 @@ export const generateErc1155Order = (
     expiry: expiry,
     nonce:
       orderData.nonce?.toString() ??
-      generateRandomV4OrderNonce(),
+      await generateRandomV4OrderNonce(),
     taker: orderData.taker?.toLowerCase() ?? NULL_ADDRESS,
   };
 
@@ -513,14 +513,17 @@ export const verifyAppIdOrThrow = (appId: string) => {
  *   Second 128bits: ${RANDOM_GENERATED_128BIT_ORDER_HASH}
  * @returns 128bit nonce as string (0x orders can handle up to 256 bit nonce)
  */
-export const generateRandomV4OrderNonce = (): string => {
+export const generateRandomV4OrderNonce = async (): Promise<string> => {
   const order128 = padStart(
     generateRandom128BitNumber(),
     ONE_TWENTY_EIGHT_BIT_LENGTH,
     '0'
   );
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  const date = await (await fetch("https://worldtimeapi.org/api/timezone/"+tz)).json()
   const sdkPrefixWithOrderTimestamp = padEnd(
-    `${RESERVED_APP_ID_PREFIX}${Math.round(Date.now() / 1000)}`,
+    `${RESERVED_APP_ID_PREFIX}${Math.round(new Date(date.utc_datetime).getTime() / 1000)})}`,
     ONE_TWENTY_EIGHT_BIT_LENGTH,
     '0'
   );
