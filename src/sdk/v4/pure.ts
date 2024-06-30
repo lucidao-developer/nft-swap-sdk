@@ -378,7 +378,7 @@ export function parseRawSignature(rawSignature: string): ECSignature {
 
 export const INFINITE_EXPIRATION_TIMESTAMP_SEC = BigNumber.from(2524604400);
 
-export const generateErc721Order = async ( 
+export const generateErc721Order = async (
   nft: UserFacingERC721AssetDataSerializedV4,
   erc20: UserFacingERC20AssetDataSerializedV4,
   orderData: Partial<OrderStructOptionsCommon> & OrderStructOptionsCommonStrict
@@ -418,9 +418,7 @@ export const generateErc721Order = async (
         };
       }) ?? [],
     expiry: expiry,
-    nonce:
-      orderData.nonce?.toString() ??
-      await generateRandomV4OrderNonce(),
+    nonce: orderData.nonce?.toString() ?? (await generateRandomV4OrderNonce()),
     taker: orderData.taker?.toLowerCase() ?? NULL_ADDRESS,
   };
 
@@ -468,9 +466,7 @@ export const generateErc1155Order = async (
         };
       }) ?? [],
     expiry: expiry,
-    nonce:
-      orderData.nonce?.toString() ??
-      await generateRandomV4OrderNonce(),
+    nonce: orderData.nonce?.toString() ?? (await generateRandomV4OrderNonce()),
     taker: orderData.taker?.toLowerCase() ?? NULL_ADDRESS,
   };
 
@@ -521,9 +517,13 @@ export const generateRandomV4OrderNonce = async (): Promise<string> => {
   );
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  const date = await (await fetch("https://worldtimeapi.org/api/timezone/"+tz)).json()
+  const date = await (
+    await fetch('https://worldtimeapi.org/api/timezone/' + tz)
+  ).json();
   const sdkPrefixWithOrderTimestamp = padEnd(
-    `${RESERVED_APP_ID_PREFIX}${Math.round(new Date(date.utc_datetime).getTime() / 1000)})}`,
+    `${RESERVED_APP_ID_PREFIX}${Math.round(
+      new Date(date.utc_datetime).getTime() / 1000
+    )}`,
     ONE_TWENTY_EIGHT_BIT_LENGTH,
     '0'
   );
