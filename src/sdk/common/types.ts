@@ -1,4 +1,4 @@
-import type { BigNumberish } from '@ethersproject/bignumber';
+import { Numberish } from '../../utils/eth';
 
 // Ensures consistent surface area, but doesn't perscribe arguments as they vary from protocol version
 export interface BaseNftSwap {
@@ -36,16 +36,14 @@ export type ApprovalStatus = {
 };
 
 export interface PayableOverrides extends TransactionOverrides {
-  value?: BigNumberish | Promise<BigNumberish>;
+  value?: bigint;
 }
 
 export interface TransactionOverrides {
-  gasLimit?: BigNumberish | Promise<BigNumberish>;
-  gasPrice?: BigNumberish | Promise<BigNumberish>;
-  maxFeePerGas?: BigNumberish | Promise<BigNumberish>;
-  maxPriorityFeePerGas?: BigNumberish | Promise<BigNumberish>;
-  nonce?: BigNumberish | Promise<BigNumberish>;
-  type?: number;
+  gas?: bigint | undefined;
+  gasPrice?: bigint | undefined;
+  maxFeePerGas?: bigint | undefined;
+  maxPriorityFeePerGas?: bigint | undefined;
+  nonce?: number;
   accessList?: any;
-  customData?: Record<string, any>;
 }

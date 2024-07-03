@@ -7,5 +7,5 @@ import { PropertyStruct } from './types';
  */
 export const CONTRACT_ORDER_VALIDATOR: PropertyStruct = {
   propertyValidator: NULL_ADDRESS,
-  propertyData: [],
+  propertyData: '0x',
 };

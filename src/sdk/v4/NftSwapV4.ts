@@ -1,19 +1,5 @@
-import type { Signer, TypedDataSigner } from '@ethersproject/abstract-signer';
-import type {
-  BaseProvider,
-  TransactionReceipt,
-} from '@ethersproject/providers';
-import { BigNumber, BigNumberish, ContractTransaction } from 'ethers';
-import { Interface } from '@ethersproject/abi';
 import invariant from 'tiny-invariant';
 import warning from 'tiny-warning';
-import {
-  ERC1155__factory,
-  ERC721__factory,
-  ERC20__factory,
-  IZeroEx,
-  IZeroEx__factory,
-} from '../../contracts';
 import type {
   ApprovalStatus,
   BaseNftSwap,
@@ -36,15 +22,12 @@ import type {
   AddressesForChainV4,
   ApprovalOverrides,
   AvailableSignatureTypesV4,
-  ERC721OrderStruct,
   FillOrderOverrides,
   NftOrderV4,
   NftOrderV4Serialized,
   OrderStructOptionsCommonStrict,
   SignedERC1155OrderStruct,
-  SignedERC1155OrderStructSerialized,
   SignedERC721OrderStruct,
-  SignedERC721OrderStructSerialized,
   SignedNftOrderV4,
   SigningOptionsV4,
   SwappableAssetV4,
@@ -69,7 +52,20 @@ import { getWrappedNativeToken } from '../../utils/addresses';
 import { DIRECTION_MAPPING, OrderStatusV4, TradeDirection } from './enums';
 import { CONTRACT_ORDER_VALIDATOR } from './properties';
 import { ETH_ADDRESS_AS_ERC20 } from './constants';
-import { ZERO_AMOUNT } from '../../utils/eth';
+import { Numberish, ZERO_AMOUNT } from '../../utils/eth';
+import {
+  encodeFunctionData,
+  erc20Abi,
+  erc721Abi,
+  getAbiItem,
+  PublicClient,
+  WaitForTransactionReceiptReturnType,
+  WalletClient,
+  WriteContractReturnType,
+  zeroAddress,
+} from 'viem';
+import { IZeroEx } from '../../abis/ZeroEx/v4/IZeroEx';
+import { erc1155Abi } from '../../abis/erc1155';
 
 export enum SupportedChainIdsV4 {
   Mainnet = 1,
@@ -113,7 +109,7 @@ export interface INftSwapV4 extends BaseNftSwap {
   ) => Promise<NftOrderV4Serialized>;
   loadApprovalStatus: (
     asset: SwappableAssetV4,
-    walletAddress: string,
+    walletAddress: `0x${string}`,
     approvalOverrides?: Partial<ApprovalOverrides>
   ) => Promise<ApprovalStatus>;
   approveTokenOrNftByAsset: (
@@ -121,22 +117,24 @@ export interface INftSwapV4 extends BaseNftSwap {
     walletAddress: string,
     approvalTransactionOverrides?: Partial<TransactionOverrides>,
     approvalOverrides?: Partial<ApprovalOverrides>
-  ) => Promise<ContractTransaction>;
+  ) => Promise<WriteContractReturnType>;
   fillSignedOrder: (
     signedOrder: SignedNftOrderV4,
     fillOrderOverrides?: Partial<FillOrderOverrides>,
     transactionOverrides?: Partial<PayableOverrides>
-  ) => Promise<ContractTransaction>;
-  awaitTransactionHash: (txHash: string) => Promise<TransactionReceipt>;
+  ) => Promise<WriteContractReturnType>;
+  awaitTransactionHash: (
+    hash: `0x${string}`
+  ) => Promise<WaitForTransactionReceiptReturnType>;
   cancelOrder: (
-    nonce: BigNumberish,
+    nonce: Numberish,
     orderType: 'ERC721' | 'ERC1155' // Can we make this optional
-  ) => Promise<ContractTransaction>;
+  ) => Promise<WriteContractReturnType>;
   matchOrders: (
     sellOrder: SignedNftOrderV4,
     buyOrder: SignedNftOrderV4,
     transactionOverrides?: Partial<PayableOverrides>
-  ) => Promise<ContractTransaction>;
+  ) => Promise<WriteContractReturnType>;
   // waitUntilOrderFilledOrCancelled: (
   //   order: NftOrderV4,
   //   timeoutInMs?: number,
@@ -169,24 +167,22 @@ export interface AdditionalSdkConfig {
   // Identify your app fills with distinct integer
   appId: string;
   // Custom zeroex proxy contract address (defaults to the canonical contracts deployed by 0x Labs core team)
-  zeroExExchangeProxyContractAddress: string;
+  zeroExExchangeProxyContractAddress: `0x${string}`;
   // Custom orderbook url. Defaults to using Trader.xyz's multi-chain open orderbook
   orderbookRootUrl: string;
 }
 
 class NftSwapV4 implements INftSwapV4 {
-  // RPC provider
-  public provider: BaseProvider;
-  // Wallet signer
-  public signer: Signer | undefined;
+  // RPC publicClient
+  public publicClient: PublicClient;
+  // Wallet walletClient
+  public walletClient: WalletClient | undefined;
   // Chain Id for this instance of NftSwapV4.
   // To switch chains, instantiate a new version of NftSWapV4 with the updated chain id.
   public chainId: number;
 
   // ZeroEx ExchangeProxy contract address to reference
-  public exchangeProxyContractAddress: string;
-  // Generated ZeroEx ExchangeProxy contracts
-  public exchangeProxy: IZeroEx;
+  public exchangeProxyContractAddress: `0x${string}`;
 
   // Unique identifier for app. Must be a positive integer between 1 and 2**128
   public appId: string;
@@ -195,19 +191,20 @@ class NftSwapV4 implements INftSwapV4 {
   public orderbookRootUrl: string;
 
   constructor(
-    provider: BaseProvider,
-    signer: Signer,
+    publicClient: PublicClient,
+    walletClient: WalletClient,
     chainId?: number | string,
     additionalConfig?: Partial<AdditionalSdkConfig>
   ) {
-    this.provider = provider;
-    this.signer = signer;
+    this.publicClient = publicClient;
+    this.walletClient = walletClient;
     this.chainId = chainId
       ? parseInt(chainId.toString(10), 10)
-      : (this.provider._network.chainId as SupportedChainIdsV4);
+      : (this.publicClient.chain?.id as SupportedChainIdsV4);
 
-    const defaultAddressesForChain: AddressesForChainV4 | undefined =
-      addresses[this.chainId as SupportedChainIdsV4];
+    const defaultAddressesForChain = addresses[
+      this.chainId as SupportedChainIdsV4
+    ] as AddressesForChainV4;
 
     const zeroExExchangeContractAddress =
       additionalConfig?.zeroExExchangeProxyContractAddress ??
@@ -225,11 +222,6 @@ class NftSwapV4 implements INftSwapV4 {
 
     this.appId = additionalConfig?.appId ?? DEFAULT_APP_ID;
     verifyAppIdOrThrow(this.appId);
-
-    this.exchangeProxy = IZeroEx__factory.connect(
-      zeroExExchangeContractAddress,
-      signer ?? provider
-    );
   }
 
   /**
@@ -242,14 +234,15 @@ class NftSwapV4 implements INftSwapV4 {
    */
   loadApprovalStatus = (
     asset: SwappableAssetV4,
-    walletAddress: string,
+    walletAddress: `0x${string}`,
     approvalOverrides?: Partial<ApprovalOverrides> | undefined
   ): Promise<ApprovalStatus> => {
     return getApprovalStatus(
       walletAddress,
-      approvalOverrides?.exchangeContractAddress ?? this.exchangeProxy.address,
+      approvalOverrides?.exchangeContractAddress ??
+        this.exchangeProxyContractAddress,
       asset,
-      this.provider,
+      this.publicClient,
       approvalOverrides?.approvalAmount
     );
   };
@@ -275,7 +268,9 @@ class NftSwapV4 implements INftSwapV4 {
       (order.direction === TradeDirection.BuyNFT && checkMaker) ||
       (order.direction === TradeDirection.SellNFT && checkTaker);
 
-    const walletAddressToCheck = checkMaker ? order.maker : order.taker;
+    const walletAddressToCheck = (
+      checkMaker ? order.maker : order.taker
+    ) as `0x${string}`;
     const assetToCheck = checkMaker
       ? this.getMakerAsset(order)
       : this.getTakerAsset(order);
@@ -287,9 +282,10 @@ class NftSwapV4 implements INftSwapV4 {
 
     return getApprovalStatus(
       walletAddressToCheck,
-      approvalOverrides?.exchangeContractAddress ?? this.exchangeProxy.address,
+      approvalOverrides?.exchangeContractAddress ??
+        this.exchangeProxyContractAddress,
       assetToCheck,
-      this.provider,
+      this.publicClient,
       maybeApprovalAmountToCheck
     );
   };
@@ -300,26 +296,42 @@ class NftSwapV4 implements INftSwapV4 {
    * @param txHash Transaction hash to await
    * @returns
    */
-  awaitTransactionHash = async (txHash: string) => {
-    return this.provider.waitForTransaction(txHash);
+  awaitTransactionHash = async (hash: `0x${string}`) => {
+    return this.publicClient.waitForTransactionReceipt({ hash });
   };
 
   /**
    * Cancels an 0x v4 order. Once cancelled, the order no longer fillable.
-   * Requires a signer
+   * Requires a walletClient
    * @param nonce
    * @param orderType
    * @returns Transaciton Receipt
    */
   cancelOrder = (
-    nonce: BigNumberish,
+    nonce: Numberish,
     orderType: 'ERC721' | 'ERC1155'
-  ): Promise<ContractTransaction> => {
+  ): Promise<WriteContractReturnType> => {
+    if (!this.walletClient)
+      throw new Error('Cannot perform write operation without a wallet client');
     if (orderType === 'ERC721') {
-      return this.exchangeProxy.cancelERC721Order(nonce);
+      return this.walletClient.writeContract({
+        address: this.exchangeProxyContractAddress,
+        functionName: 'cancelERC721Order',
+        abi: IZeroEx,
+        args: [BigInt(nonce)],
+        account: this.walletClient.account || zeroAddress,
+        chain: this.walletClient.chain,
+      });
     }
     if (orderType === 'ERC1155') {
-      return this.exchangeProxy.cancelERC1155Order(nonce);
+      return this.walletClient.writeContract({
+        address: this.exchangeProxyContractAddress,
+        functionName: 'cancelERC1155Order',
+        abi: IZeroEx,
+        args: [BigInt(nonce)],
+        account: this.walletClient.account || zeroAddress,
+        chain: this.walletClient.chain,
+      });
     }
     console.log('unsupported order', orderType);
     throw new Error('unsupport order');
@@ -329,7 +341,7 @@ class NftSwapV4 implements INftSwapV4 {
    * Batch fill NFT sell orders
    * Can be used by taker to fill multiple NFT sell orders atomically.
    * E.g. A taker has a shopping cart full of NFTs to buy, can call this method to fill them all.
-   * Requires a valid signer to execute transaction
+   * Requires a valid walletClient to execute transaction
    * @param signedOrders Signed 0x NFT sell orders
    * @param revertIfIncomplete Revert if we don't fill _all_ orders (defaults to false)
    * @param transactionOverrides Ethers transaciton overrides
@@ -340,6 +352,9 @@ class NftSwapV4 implements INftSwapV4 {
     revertIfIncomplete: boolean = false,
     transactionOverrides?: PayableOverrides
   ) => {
+    if (!this.walletClient)
+      throw new Error('Cannot perform write operation without a wallet client');
+
     const allSellOrders = signedOrders.every((signedOrder) => {
       if (signedOrder.direction === 0) {
         return true;
@@ -374,46 +389,64 @@ class NftSwapV4 implements INftSwapV4 {
     );
 
     if (allErc721) {
-      const erc721SignedOrders: SignedERC721OrderStruct[] =
-        signedOrders as SignedERC721OrderStruct[];
-      return this.exchangeProxy.batchBuyERC721s(
-        erc721SignedOrders,
-        erc721SignedOrders.map((so) => so.signature),
-        erc721SignedOrders.map((_) => '0x'),
-        revertIfIncomplete,
-        {
-          ...transactionOverrides,
-        }
-      );
+      const erc721SignedOrders = signedOrders as SignedERC721OrderStruct[];
+      return this.walletClient.writeContract({
+        address: this.exchangeProxyContractAddress,
+        functionName: 'batchBuyERC721s',
+        abi: IZeroEx,
+        args: [
+          erc721SignedOrders,
+          erc721SignedOrders.map((so) => so.signature),
+          erc721SignedOrders.map((_) => '0x') as `0x${string}`[],
+          revertIfIncomplete,
+        ],
+        account: this.walletClient.account || zeroAddress,
+        chain: this.walletClient.chain,
+        ...transactionOverrides,
+      } as any);
     } else if (allErc1155) {
-      const erc1155SignedOrders: SignedERC1155OrderStruct[] =
-        signedOrders as SignedERC1155OrderStruct[];
-      return this.exchangeProxy.batchBuyERC1155s(
-        erc1155SignedOrders,
-        erc1155SignedOrders.map((so) => so.signature),
-        erc1155SignedOrders.map((so) => so.erc1155TokenAmount),
-        erc1155SignedOrders.map((_) => '0x'),
-        revertIfIncomplete,
-        {
-          ...transactionOverrides,
-        }
-      );
+      const erc1155SignedOrders = signedOrders as SignedERC1155OrderStruct[];
+      return this.walletClient.writeContract({
+        address: this.exchangeProxyContractAddress,
+        functionName: 'batchBuyERC1155s',
+        abi: IZeroEx,
+        args: [
+          erc1155SignedOrders,
+          erc1155SignedOrders.map((so) => so.signature),
+          erc1155SignedOrders.map((so) => so.erc1155TokenAmount) as bigint[],
+          erc1155SignedOrders.map((_) => '0x') as `0x${string}`[],
+          revertIfIncomplete,
+        ],
+        account: this.walletClient.account || zeroAddress,
+        chain: this.walletClient.chain,
+        ...transactionOverrides,
+      } as any);
     } else {
       throw Error('batchBuyNfts: Incompatible state');
     }
   };
 
   /**
-   * Derives order hash from order (currently requires a provider to derive)
+   * Derives order hash from order (currently requires a publicClient to derive)
    * @param order A 0x v4 order (signed or unsigned)
    * @returns Order hash
    */
-  getOrderHash = (order: NftOrderV4Serialized): Promise<string> => {
+  getOrderHash = (order: NftOrderV4): Promise<string> => {
     if ('erc721Token' in order) {
-      return this.exchangeProxy.getERC721OrderHash(order);
+      return this.publicClient.readContract({
+        address: this.exchangeProxyContractAddress,
+        functionName: 'getERC721OrderHash',
+        abi: IZeroEx,
+        args: [order],
+      });
     }
     if ('erc1155Token' in order) {
-      return this.exchangeProxy.getERC1155OrderHash(order);
+      return this.publicClient.readContract({
+        address: this.exchangeProxyContractAddress,
+        functionName: 'getERC1155OrderHash',
+        abi: IZeroEx,
+        args: [order],
+      });
     }
     throw new Error('unsupport order');
   };
@@ -431,19 +464,21 @@ class NftSwapV4 implements INftSwapV4 {
    */
   getOrderStatus = async (order: NftOrderV4): Promise<number> => {
     if ('erc721Token' in order) {
-      const erc721OrderStatus = await this.exchangeProxy.getERC721OrderStatus(
-        order
-      );
-      return erc721OrderStatus;
+      return this.publicClient.readContract({
+        address: this.exchangeProxyContractAddress,
+        functionName: 'getERC721OrderStatus',
+        abi: IZeroEx,
+        args: [order],
+      });
     }
     if ('erc1155Token' in order) {
-      const [
-        _erc1155OrderHash,
-        erc1155OrderStatus,
-        _erc1155OrderAmount,
-        _erc1155OrderAmountReminaing,
-      ] = await this.exchangeProxy.getERC1155OrderInfo(order);
-      return erc1155OrderStatus;
+      const { status } = await this.publicClient.readContract({
+        address: this.exchangeProxyContractAddress,
+        functionName: 'getERC1155OrderInfo',
+        abi: IZeroEx,
+        args: [order],
+      });
+      return status;
     }
     console.log('unsupported order', order);
     throw new Error('unsupport order');
@@ -462,13 +497,13 @@ class NftSwapV4 implements INftSwapV4 {
     _walletAddress: string, // Remove in next release
     approvalTransactionOverrides?: Partial<TransactionOverrides>,
     otherOverrides?: Partial<ApprovalOverrides>
-  ): Promise<ContractTransaction> => {
-    const signedToUse = otherOverrides?.signer ?? this.signer;
+  ) => {
+    const signedToUse = otherOverrides?.walletClient ?? this.walletClient;
     if (!signedToUse) {
       throw new Error('Signed not defined');
     }
     return approveAsset(
-      this.exchangeProxy.address,
+      this.exchangeProxyContractAddress,
       asset,
       signedToUse,
       {
@@ -478,10 +513,6 @@ class NftSwapV4 implements INftSwapV4 {
     );
   };
 
-  // // TyPeSaFeTy: Order types supported:
-  // // ERC721<>ERC20
-  // // ERC1155<>ERC20
-  // // Below ensures type-safe for those specific combinations
   /**
    * Builds a 0x order given two assets (either NFT<>ERC20 or ERC20<>NFT)
    * @param makerAsset An asset (ERC20, ERC721, or ERC1155) the user has
@@ -638,7 +669,7 @@ class NftSwapV4 implements INftSwapV4 {
   };
 
   /**
-   * Signs a 0x order. Requires a signer (e.g. wallet or private key)
+   * Signs a 0x order. Requires a walletClient (e.g. wallet or private key)
    * Once signed, the order becomes fillable (as long as the order is valid)
    * 0x orders require a signature to fill.
    * @param order A 0x v4 order
@@ -649,8 +680,8 @@ class NftSwapV4 implements INftSwapV4 {
     order: NftOrderV4,
     signingOptions?: Partial<SigningOptionsV4>
   ): Promise<SignedNftOrderV4> => {
-    if (!this.signer) {
-      throw new Error('Signer not defined');
+    if (!this.walletClient) {
+      throw new Error('walletClient not defined');
     }
 
     let method: AvailableSignatureTypesV4 = 'eoa';
@@ -668,13 +699,14 @@ class NftSwapV4 implements INftSwapV4 {
         // let's try feature detection to automagically pick a signature type
         // By default we fallback to EOA signing if we can't figure it out.
 
-        // Let's try to determine if the signer is a contract wallet or not.
+        // Let's try to determine if the walletClient is a contract wallet or not.
         // If it is, we'll try EIP-1271, otherwise we'll do a normal sign
-        const signerAddress = await this.signer.getAddress();
+        const walletClientAddress =
+          this.walletClient.account?.address || zeroAddress;
 
         const isContractWallet = await checkIfContractWallet(
-          this.provider,
-          signerAddress
+          this.publicClient,
+          walletClientAddress
         );
         if (isContractWallet) {
           method = 'eip1271';
@@ -687,9 +719,9 @@ class NftSwapV4 implements INftSwapV4 {
       case 'eoa': {
         const rawSignature = await signOrderWithEoaWallet(
           order,
-          this.signer as unknown as TypedDataSigner,
+          this.walletClient,
           this.chainId,
-          this.exchangeProxy.address
+          this.exchangeProxyContractAddress
         );
 
         const ecSignature = parseRawSignature(rawSignature);
@@ -711,8 +743,8 @@ class NftSwapV4 implements INftSwapV4 {
           ...order,
           signature: {
             signatureType: 4,
-            r: '0',
-            s: '0',
+            r: '0x' as `0x${string}`,
+            s: '0x' as `0x${string}`,
             v: 0,
           },
         };
@@ -738,9 +770,9 @@ class NftSwapV4 implements INftSwapV4 {
     fillOrderOverrides?: Partial<FillOrderOverrides>,
     transactionOverrides?: Partial<PayableOverrides>
   ) => {
-    if (!this.signer) {
+    if (!this.walletClient) {
       throw new Error(
-        'Signer undefined. Signer must be provided to fill order'
+        'walletClient undefined. walletClient must be provided to fill order'
       );
     }
     if (signedOrder.direction !== TradeDirection.BuyNFT) {
@@ -749,62 +781,72 @@ class NftSwapV4 implements INftSwapV4 {
       );
     }
 
-    const signerAddress = await this.signer.getAddress();
+    const walletClientAddress =
+      this.walletClient.account?.address || zeroAddress;
     const unwrapWeth =
       fillOrderOverrides?.fillOrderWithNativeTokenInsteadOfWrappedToken ??
       false;
 
     // Handle ERC721
     if ('erc721Token' in signedOrder) {
-      const erc721Contract = ERC721__factory.connect(
-        signedOrder.erc721Token,
-        this.signer
-      );
+      const encodingAbi = ERC721_TRANSFER_FROM_DATA;
 
-      const encodingIface = new Interface(ERC721_TRANSFER_FROM_DATA);
+      const functionName = 'safeTransferFromErc721Data';
+      const params = [signedOrder, signedOrder.signature, unwrapWeth];
 
-      const fragment = encodingIface.getFunction('safeTransferFromErc721Data');
-      const data = encodingIface._encodeParams(fragment.inputs, [
-        signedOrder,
-        signedOrder.signature,
-        unwrapWeth,
-      ]);
+      const data = encodeFunctionData({
+        abi: encodingAbi,
+        functionName: functionName,
+        args: params,
+      });
 
-      const transferFromTx = await erc721Contract[
-        'safeTransferFrom(address,address,uint256,bytes)'
-      ](
-        signerAddress,
-        this.exchangeProxy.address,
-        fillOrderOverrides?.tokenIdToSellForCollectionOrder ?? tokenId,
-        data,
-        transactionOverrides ?? {}
-      );
+      const transferFromTx = await this.walletClient.writeContract({
+        address: signedOrder.erc721Token,
+        abi: erc721Abi,
+        functionName: 'safeTransferFrom',
+        args: [
+          walletClientAddress,
+          this.exchangeProxyContractAddress,
+          fillOrderOverrides?.tokenIdToSellForCollectionOrder ??
+            BigInt(tokenId),
+          data,
+        ],
+        chain: this.walletClient.chain,
+        account: walletClientAddress,
+        ...transactionOverrides,
+      } as any);
       return transferFromTx;
     }
 
     // Handle ERC1155
     if ('erc1155Token' in signedOrder) {
-      const erc1155Contract = ERC1155__factory.connect(
-        signedOrder.erc1155Token,
-        this.signer
-      );
-      const encodingIface = new Interface(ERC1155_TRANSFER_FROM_DATA);
+      const encodingAbi = ERC1155_TRANSFER_FROM_DATA;
 
-      const fragment = encodingIface.getFunction('safeTransferFromErc1155Data');
-      const data = encodingIface._encodeParams(fragment.inputs, [
-        signedOrder,
-        signedOrder.signature,
-        unwrapWeth,
-      ]);
+      const functionName = 'safeTransferFromErc1155Data';
+      const params = [signedOrder, signedOrder.signature, unwrapWeth];
 
-      const transferFromTx = await erc1155Contract.safeTransferFrom(
-        signerAddress,
-        this.exchangeProxy.address,
-        fillOrderOverrides?.tokenIdToSellForCollectionOrder ?? tokenId,
-        signedOrder.erc1155TokenAmount ?? '1',
-        data,
-        transactionOverrides ?? {}
-      );
+      const data = encodeFunctionData({
+        abi: encodingAbi,
+        functionName: functionName,
+        args: params,
+      });
+
+      const transferFromTx = await this.walletClient.writeContract({
+        address: signedOrder.erc1155Token,
+        abi: erc1155Abi,
+        functionName: 'safeTransferFrom',
+        args: [
+          walletClientAddress,
+          this.exchangeProxyContractAddress,
+          fillOrderOverrides?.tokenIdToSellForCollectionOrder ??
+            BigInt(tokenId),
+          signedOrder.erc1155TokenAmount ?? 1n,
+          data,
+        ],
+        chain: this.walletClient.chain,
+        account: walletClientAddress,
+        ...transactionOverrides,
+      } as any);
       return transferFromTx;
     }
 
@@ -822,14 +864,14 @@ class NftSwapV4 implements INftSwapV4 {
    */
   fillSignedCollectionOrder = async (
     signedOrder: SignedNftOrderV4,
-    tokenId: BigNumberish,
+    tokenId: Numberish,
     fillOrderOverrides?: Partial<FillOrderOverrides>,
     transactionOverrides?: Partial<PayableOverrides>
   ) => {
     return this.fillSignedOrder(
       signedOrder,
       {
-        tokenIdToSellForCollectionOrder: tokenId,
+        tokenIdToSellForCollectionOrder: BigInt(tokenId),
         ...fillOrderOverrides,
       },
       {
@@ -854,6 +896,9 @@ class NftSwapV4 implements INftSwapV4 {
     fillOrderOverrides?: Partial<FillOrderOverrides>,
     transactionOverrides?: Partial<PayableOverrides>
   ) => {
+    if (!this.walletClient) {
+      throw new Error('walletClient not defined');
+    }
     // Only Sell orders can be filled with ETH
     const canOrderTypeBeFilledWithNativeToken =
       signedOrder.direction === TradeDirection.SellNFT;
@@ -867,17 +912,21 @@ class NftSwapV4 implements INftSwapV4 {
     if ('erc1155Token' in signedOrder) {
       // If maker is selling an NFT, taker wants to 'buy' nft
       if (signedOrder.direction === TradeDirection.SellNFT) {
-        return this.exchangeProxy.buyERC1155(
-          signedOrder,
-          signedOrder.signature,
-          signedOrder.erc1155TokenAmount,
-          '0x',
-          {
-            // If we're filling an order with ETH, be sure to include the value with fees added
-            value: needsEthAttached ? erc20TotalAmount : undefined,
-            ...transactionOverrides,
-          }
-        );
+        return this.walletClient.writeContract({
+          address: this.exchangeProxyContractAddress,
+          abi: IZeroEx,
+          functionName: 'buyERC1155',
+          args: [
+            signedOrder,
+            signedOrder.signature,
+            signedOrder.erc1155TokenAmount,
+            '0x',
+          ],
+          chain: this.walletClient.chain,
+          account: this.walletClient.account || zeroAddress,
+          value: needsEthAttached ? erc20TotalAmount : undefined,
+          ...transactionOverrides,
+        } as any);
       } else {
         // TODO(detect if erc20 token is wrapped token, then switch true. if true when not wrapped token, tx will fail)
         let unwrapNativeToken: boolean =
@@ -896,32 +945,37 @@ class NftSwapV4 implements INftSwapV4 {
         }
 
         // Otherwise, taker is selling the nft (and buying an ERC20)
-        return this.exchangeProxy.sellERC1155(
-          signedOrder,
-          signedOrder.signature,
-          fillOrderOverrides?.tokenIdToSellForCollectionOrder ??
-            signedOrder.erc1155TokenId,
-          signedOrder.erc1155TokenAmount,
-          unwrapNativeToken,
-          '0x',
-          {
-            ...transactionOverrides,
-          }
-        );
+        return this.walletClient.writeContract({
+          address: this.exchangeProxyContractAddress,
+          abi: IZeroEx,
+          functionName: 'sellERC1155',
+          args: [
+            signedOrder,
+            signedOrder.signature,
+            fillOrderOverrides?.tokenIdToSellForCollectionOrder ??
+              signedOrder.erc1155TokenId,
+            signedOrder.erc1155TokenAmount,
+            unwrapNativeToken,
+            '0x',
+          ],
+          chain: this.walletClient.chain,
+          account: this.walletClient.account || zeroAddress,
+          ...transactionOverrides,
+        } as any);
       }
     } else if ('erc721Token' in signedOrder) {
       // If maker is selling an NFT, taker wants to 'buy' nft
       if (signedOrder.direction === TradeDirection.SellNFT) {
-        return this.exchangeProxy.buyERC721(
-          signedOrder,
-          signedOrder.signature,
-          '0x',
-          {
-            // If we're filling an order with ETH, be sure to include the value with fees added
-            value: needsEthAttached ? erc20TotalAmount : undefined,
-            ...transactionOverrides,
-          }
-        );
+        return this.walletClient.writeContract({
+          address: this.exchangeProxyContractAddress,
+          abi: IZeroEx,
+          functionName: 'buyERC721',
+          args: [signedOrder, signedOrder.signature, '0x'],
+          chain: this.walletClient.chain,
+          account: this.walletClient.account || zeroAddress,
+          value: needsEthAttached ? erc20TotalAmount : undefined,
+          ...transactionOverrides,
+        } as any);
       } else {
         // TODO(detect if erc20 token is wrapped token, then switch true. if true when not wrapped token, tx will fail)
         let unwrapNativeToken: boolean =
@@ -940,17 +994,22 @@ class NftSwapV4 implements INftSwapV4 {
         }
 
         // Otherwise, taker is selling the nft (and buying an ERC20)
-        return this.exchangeProxy.sellERC721(
-          signedOrder,
-          signedOrder.signature,
-          fillOrderOverrides?.tokenIdToSellForCollectionOrder ??
-            signedOrder.erc721TokenId,
-          unwrapNativeToken,
-          '0x',
-          {
-            ...transactionOverrides,
-          }
-        );
+        return this.walletClient.writeContract({
+          address: this.exchangeProxyContractAddress,
+          abi: IZeroEx,
+          functionName: 'sellERC721',
+          args: [
+            signedOrder,
+            signedOrder.signature,
+            fillOrderOverrides?.tokenIdToSellForCollectionOrder ??
+              signedOrder.erc721TokenId,
+            unwrapNativeToken,
+            '0x',
+          ],
+          chain: this.walletClient.chain,
+          account: this.walletClient.account || zeroAddress,
+          ...transactionOverrides,
+        } as any);
       }
     }
     console.log('unsupported order', signedOrder);
@@ -970,6 +1029,9 @@ class NftSwapV4 implements INftSwapV4 {
     fillOrderOverrides?: Partial<FillOrderOverrides>,
     transactionOverrides?: Partial<PayableOverrides>
   ) => {
+    if (!this.walletClient) {
+      throw new Error('walletClient not defined');
+    }
     // Do pre-sign
     if ('erc1155Token' in order) {
       // If maker is selling an NFT, taker wants to 'buy' nft
@@ -983,9 +1045,15 @@ class NftSwapV4 implements INftSwapV4 {
           'Collection order missing NFT tokenId to fill with. Specify in fillOrderOverrides.tokenIdToSellForCollectionOrder'
         );
       }
-      return this.exchangeProxy.preSignERC1155Order(order, {
+      return this.walletClient.writeContract({
+        address: this.exchangeProxyContractAddress,
+        abi: IZeroEx,
+        functionName: 'preSignERC1155Order',
+        args: [order],
+        chain: this.walletClient.chain,
+        account: this.walletClient.account || zeroAddress,
         ...transactionOverrides,
-      });
+      } as any);
     } else if ('erc721Token' in order) {
       // If maker is selling an NFT, taker wants to 'buy' nft
       if (
@@ -999,9 +1067,15 @@ class NftSwapV4 implements INftSwapV4 {
         );
       }
       // Otherwise, taker is selling the nft (and buying an ERC20)
-      return this.exchangeProxy.preSignERC721Order(order, {
+      return this.walletClient.writeContract({
+        address: this.exchangeProxyContractAddress,
+        abi: IZeroEx,
+        functionName: 'preSignERC721Order',
+        args: [order],
+        chain: this.walletClient.chain,
+        account: this.walletClient.account || zeroAddress,
         ...transactionOverrides,
-      });
+      } as any);
     }
     warning('Unsupported order', order);
     throw new Error('unsupport signedOrder type');
@@ -1063,14 +1137,18 @@ class NftSwapV4 implements INftSwapV4 {
   ) => {
     if ('erc721Token' in sellOrder && 'erc721Token' in buyOrder) {
       // TODO(johnrjj) - More validation here before we match on-chain
-      const contractTx = await this.exchangeProxy.matchERC721Orders(
-        sellOrder,
-        buyOrder,
-        sellOrder.signature,
-        buyOrder.signature,
-        transactionOverrides ?? {}
-      );
-      return contractTx;
+      if (!this.walletClient) {
+        throw new Error('walletClient not defined');
+      }
+      return this.walletClient.writeContract({
+        address: this.exchangeProxyContractAddress,
+        abi: IZeroEx,
+        functionName: 'matchERC721Orders',
+        args: [sellOrder, buyOrder, sellOrder.signature, buyOrder.signature],
+        chain: this.walletClient.chain,
+        account: this.walletClient.account || zeroAddress,
+        ...transactionOverrides,
+      } as any);
     }
 
     throw new Error(
@@ -1149,17 +1227,21 @@ class NftSwapV4 implements INftSwapV4 {
   ): Promise<boolean> => {
     if ('erc721Token' in signedOrder) {
       // Validate functions on-chain return void if successful
-      await this.exchangeProxy.validateERC721OrderSignature(
-        signedOrder,
-        signedOrder.signature
-      );
+      await this.publicClient.readContract({
+        address: this.exchangeProxyContractAddress,
+        abi: IZeroEx,
+        functionName: 'validateERC721OrderSignature',
+        args: [signedOrder, signedOrder.signature],
+      } as any);
       return true;
     } else if ('erc1155Token' in signedOrder) {
       // Validate functions on-chain return void if successful
-      await this.exchangeProxy.validateERC1155OrderSignature(
-        signedOrder,
-        signedOrder.signature
-      );
+      await this.publicClient.readContract({
+        address: this.exchangeProxyContractAddress,
+        abi: IZeroEx,
+        functionName: 'validateERC1155OrderSignature',
+        args: [signedOrder, signedOrder.signature],
+      } as any);
       return true;
     } else {
       throw new Error('Unknown order type (not ERC721 or ERC1155)');
@@ -1170,28 +1252,40 @@ class NftSwapV4 implements INftSwapV4 {
    * Fetches the balance of an asset for a given wallet address
    * @param asset A Tradeable asset -- An ERC20, ERC721, or ERC1155
    * @param walletAddress A wallet address ('0x1234...6789')
-   * @param provider Optional, defaults to the class's provider but can be overridden
-   * @returns A BigNumber balance (e.g. 1 or 0 for ERC721s. ERC20 and ERC1155s can have balances greater than 1)
+   * @param publicClient Optional, defaults to the class's publicClient but can be overridden
+   * @returns A bigint balance (e.g. 1 or 0 for ERC721s. ERC20 and ERC1155s can have balances greater than 1)
    */
   fetchBalanceForAsset = async (
     asset: SwappableAssetV4,
-    walletAddress: string,
-    provider: BaseProvider = this.provider
-  ): Promise<BigNumber> => {
+    walletAddress: `0x${string}`,
+    publicClient: PublicClient = this.publicClient
+  ): Promise<bigint> => {
     switch (asset.type) {
       case 'ERC20':
-        const erc20 = ERC20__factory.connect(asset.tokenAddress, provider);
-        return erc20.balanceOf(walletAddress);
+        return publicClient.readContract({
+          address: asset.tokenAddress as `0x${string}`,
+          functionName: 'balanceOf',
+          abi: erc20Abi,
+          args: [walletAddress],
+        });
       case 'ERC721':
-        const erc721 = ERC721__factory.connect(asset.tokenAddress, provider);
-        const owner = await erc721.ownerOf(asset.tokenId);
+        const owner = await publicClient.readContract({
+          address: asset.tokenAddress as `0x${string}`,
+          functionName: 'ownerOf',
+          abi: erc721Abi,
+          args: [BigInt(asset.tokenId)],
+        });
         if (owner.toLowerCase() === walletAddress.toLowerCase()) {
-          return BigNumber.from(1);
+          return BigInt(1);
         }
-        return BigNumber.from(0);
+        return BigInt(0);
       case 'ERC1155':
-        const erc1155 = ERC1155__factory.connect(asset.tokenAddress, provider);
-        return erc1155.balanceOf(walletAddress, asset.tokenId);
+        return publicClient.readContract({
+          address: asset.tokenAddress as `0x${string}`,
+          functionName: 'balanceOf',
+          abi: erc1155Abi,
+          args: [walletAddress, BigInt(asset.tokenId)],
+        });
       default:
         throw new Error(`Asset type unknown ${(asset as any).type}`);
     }
@@ -1200,7 +1294,7 @@ class NftSwapV4 implements INftSwapV4 {
   // TODO(johnrjj) Consolidate w/ checkOrderCanBeFilledMakerSide
   checkOrderCanBeFilledTakerSide = async (
     order: NftOrderV4,
-    takerWalletAddress: string
+    takerWalletAddress: `0x${string}`
   ) => {
     const takerAsset = this.getTakerAsset(order);
     const takerApprovalStatus = await this.loadApprovalStatusForOrder(
@@ -1212,9 +1306,9 @@ class NftSwapV4 implements INftSwapV4 {
       takerWalletAddress
     );
 
-    const hasBalance: boolean = takerBalance.gte(
-      (takerAsset as UserFacingERC20AssetDataSerializedV4).amount ?? 1
-    );
+    const hasBalance: boolean =
+      takerBalance >=
+      BigInt((takerAsset as UserFacingERC20AssetDataSerializedV4).amount ?? 1n);
 
     const isApproved: boolean =
       takerApprovalStatus.contractApproved ||
@@ -1247,9 +1341,9 @@ class NftSwapV4 implements INftSwapV4 {
       makerAddress
     );
 
-    const hasBalance: boolean = makerBalance.gte(
-      (makerAsset as UserFacingERC20AssetDataSerializedV4).amount ?? 1
-    );
+    const hasBalance: boolean =
+      makerBalance >=
+      BigInt((makerAsset as UserFacingERC20AssetDataSerializedV4).amount ?? 1);
     const isApproved: boolean =
       makerApprovalStatus.tokenIdApproved ||
       makerApprovalStatus.contractApproved ||
@@ -1270,12 +1364,12 @@ class NftSwapV4 implements INftSwapV4 {
    * @param order A 0x v4 order (signed or un-signed);
    * @returns Total summed fees for a 0x v4 order. Amount is represented in Erc20 token units.
    */
-  getTotalFees = (order: NftOrderV4): BigNumber => {
+  getTotalFees = (order: NftOrderV4): bigint => {
     const fees = order.fees;
     // In 0x v4, fees are additive (not included in the original erc20 amount)
     let feesTotal = ZERO_AMOUNT;
     fees.forEach((fee) => {
-      feesTotal = feesTotal.add(BigNumber.from(fee.amount));
+      feesTotal = feesTotal + BigInt(fee.amount);
     });
     return feesTotal;
   };
@@ -1286,13 +1380,11 @@ class NftSwapV4 implements INftSwapV4 {
    * @param order A 0x v4 order;
    * @returns Total cost of an order (base amount + fees). Amount is represented in Erc20 token units. Does not include gas costs.
    */
-  getErc20TotalIncludingFees = (order: NftOrderV4): BigNumber => {
+  getErc20TotalIncludingFees = (order: NftOrderV4): bigint => {
     const fees = order.fees;
     // In 0x v4, fees are additive (not included in the original erc20 amount)
     let feesTotal = this.getTotalFees(order);
-    const orderTotalCost = BigNumber.from(order.erc20TokenAmount).add(
-      feesTotal
-    );
+    const orderTotalCost = BigInt(order.erc20TokenAmount) + feesTotal;
     return orderTotalCost;
   };
 }

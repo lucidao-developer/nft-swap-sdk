@@ -26,10 +26,6 @@ class ModuleError extends Error {
       if (options.transient) this.transient = true;
       if (options.cause) this.cause = options.cause;
     }
-
-    if (Error.captureStackTrace) {
-      Error.captureStackTrace(this, this.constructor);
-    }
   }
 }
 

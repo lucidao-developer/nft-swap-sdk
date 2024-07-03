@@ -1,20 +1,10 @@
-import { Signer, TypedDataSigner } from '@ethersproject/abstract-signer';
-import { BigNumber, BigNumberish } from '@ethersproject/bignumber';
-import { hexDataLength, hexDataSlice } from '@ethersproject/bytes';
-import type { BaseProvider, Provider } from '@ethersproject/providers';
-import type { ContractTransaction } from '@ethersproject/contracts';
 import getUnixTime from 'date-fns/getUnixTime';
 import { v4 } from 'uuid';
 import warning from 'tiny-warning';
 import invariant from 'tiny-invariant';
 import padEnd from 'lodash/padEnd';
 import padStart from 'lodash/padStart';
-import {
-  ERC1155__factory,
-  ERC20__factory,
-  ERC721__factory,
-} from '../../contracts';
-import { NULL_ADDRESS } from '../../utils/eth';
+import { NULL_ADDRESS, Numberish } from '../../utils/eth';
 import { UnexpectedAssetTypeError } from '../error';
 import type {
   ECSignature,
@@ -43,21 +33,29 @@ import {
   PROPERTY_ABI,
   ETH_ADDRESS_AS_ERC20,
 } from './constants';
+import {
+  erc20Abi,
+  erc721Abi,
+  hexToBytes,
+  PublicClient,
+  slice,
+  WalletClient,
+  zeroAddress,
+} from 'viem';
+import { erc1155Abi } from '../../abis/erc1155';
 
 // Some arbitrarily high number.
 // TODO(johnrjj) - Support custom ERC20 approval amounts
-export const MAX_APPROVAL = BigNumber.from(2).pow(118);
+export const MAX_APPROVAL = 2n ** 118n;
 
-// Weird issue with BigNumber and approvals...need to look into it, adding buffer.
-const MAX_APPROVAL_WITH_BUFFER = BigNumber.from(MAX_APPROVAL.toString()).sub(
-  '100000000000000000'
-);
+// Weird issue with bigint and approvals...need to look into it, adding buffer.
+const MAX_APPROVAL_WITH_BUFFER = MAX_APPROVAL - 100000000000000000n;
 
 export const signOrderWithEoaWallet = async (
   order: NftOrderV4,
-  signer: TypedDataSigner,
+  walletClient: WalletClient,
   chainId: number,
-  exchangeContractAddress: string
+  exchangeContractAddress: `0x${string}`
 ) => {
   if ((order as ERC1155OrderStruct).erc1155Token) {
     const domain = {
@@ -71,13 +69,14 @@ export const signOrderWithEoaWallet = async (
       Fee: FEE_ABI,
       Property: PROPERTY_ABI,
     };
-    const value = order;
 
-    const rawSignatureFromEoaWallet = await signer._signTypedData(
+    const rawSignatureFromEoaWallet = await walletClient.signTypedData({
       domain,
       types,
-      value
-    );
+      primaryType: 'ERC1155Order',
+      message: order,
+      account: walletClient.account || zeroAddress,
+    });
 
     return rawSignatureFromEoaWallet;
   }
@@ -96,11 +95,13 @@ export const signOrderWithEoaWallet = async (
     };
     const value = order;
 
-    const rawSignatureFromEoaWallet = await signer._signTypedData(
+    const rawSignatureFromEoaWallet = await walletClient.signTypedData({
       domain,
       types,
-      value
-    );
+      primaryType: 'ERC721Order',
+      message: order,
+      account: walletClient.account || zeroAddress,
+    });
 
     return rawSignatureFromEoaWallet;
   }
@@ -111,9 +112,9 @@ export const signOrderWithEoaWallet = async (
 
 export const preSignOrder = async (
   order: NftOrderV4,
-  signer: TypedDataSigner,
+  walletClient: WalletClient,
   chainId: number,
-  exchangeContractAddress: string
+  exchangeContractAddress: `0x${string}`
 ) => {
   if ((order as ERC1155OrderStruct).erc1155Token) {
     const domain = {
@@ -127,13 +128,14 @@ export const preSignOrder = async (
       Fee: FEE_ABI,
       Property: PROPERTY_ABI,
     };
-    const value = order;
 
-    const rawSignatureFromEoaWallet = await signer._signTypedData(
+    const rawSignatureFromEoaWallet = await walletClient.signTypedData({
       domain,
       types,
-      value
-    );
+      primaryType: 'ERC1155Order',
+      message: order,
+      account: walletClient.account || zeroAddress,
+    });
 
     return rawSignatureFromEoaWallet;
   }
@@ -150,13 +152,14 @@ export const preSignOrder = async (
       Fee: FEE_ABI,
       Property: PROPERTY_ABI,
     };
-    const value = order;
 
-    const rawSignatureFromEoaWallet = await signer._signTypedData(
+    const rawSignatureFromEoaWallet = await walletClient.signTypedData({
       domain,
       types,
-      value
-    );
+      primaryType: 'ERC721Order',
+      message: order,
+      account: walletClient.account || zeroAddress,
+    });
 
     return rawSignatureFromEoaWallet;
   }
@@ -166,29 +169,15 @@ export const preSignOrder = async (
 };
 
 export const checkIfContractWallet = async (
-  provider: Provider,
-  walletAddress: string
+  publicClient: PublicClient,
+  walletAddress: `0x${string}`
 ): Promise<boolean> => {
   let isContractWallet: boolean = false;
-  if (provider.getCode) {
-    let walletCode = await provider.getCode(walletAddress);
+  if (publicClient) {
+    let walletCode = await publicClient.getCode({ address: walletAddress });
     // Wallet Code returns '0x' if no contract address is associated with
     // Note: Lazy loaded contract wallets will show 0x initially, so we fall back to feature detection
     if (walletCode && walletCode !== '0x') {
-      isContractWallet = true;
-    }
-  }
-  let isSequence = !!(provider as any)._isSequenceProvider;
-  if (isSequence) {
-    isContractWallet = true;
-  }
-  // Walletconnect hides the real provider in the provider (yo dawg)
-  let providerToUse = (provider as any).provider;
-  if (providerToUse?.isWalletConnect) {
-    const isSequenceViaWalletConnect = !!(
-      (providerToUse as any).connector?._peerMeta?.description === 'Sequence'
-    );
-    if (isSequenceViaWalletConnect) {
       isContractWallet = true;
     }
   }
@@ -205,12 +194,12 @@ export const checkIfContractWallet = async (
  * @returns
  */
 export const getApprovalStatus = async (
-  walletAddress: string,
-  exchangeProxyAddressForAsset: string,
+  walletAddress: `0x${string}`,
+  exchangeProxyAddressForAsset: `0x${string}`,
   asset: SwappableAssetV4,
-  provider: BaseProvider,
+  publicClient: PublicClient,
   // ERC20 approval amount manual setting. Not used for ERC721/1155s.
-  approvalAmount: BigNumberish = MAX_APPROVAL_WITH_BUFFER
+  approvalAmount: Numberish = MAX_APPROVAL_WITH_BUFFER
 ): Promise<ApprovalStatus> => {
   switch (asset.type) {
     case 'ERC20':
@@ -220,25 +209,31 @@ export const getApprovalStatus = async (
           contractApproved: true,
         };
       }
-      const erc20 = ERC20__factory.connect(asset.tokenAddress, provider);
-      const erc20AllowanceBigNumber: BigNumber = await erc20.allowance(
-        walletAddress,
-        exchangeProxyAddressForAsset
-      );
+      const erc20Allowance = await publicClient.readContract({
+        address: asset.tokenAddress as `0x${string}`,
+        functionName: 'allowance',
+        abi: erc20Abi,
+        args: [walletAddress, exchangeProxyAddressForAsset],
+      });
 
-      const hasEnoughApproval = erc20AllowanceBigNumber.gte(approvalAmount);
+      const hasEnoughApproval = erc20Allowance >= BigInt(approvalAmount);
       return {
         contractApproved: hasEnoughApproval,
       };
     case 'ERC721':
-      const erc721 = ERC721__factory.connect(asset.tokenAddress, provider);
-      const erc721ApprovalForAllPromise = erc721.isApprovedForAll(
-        walletAddress,
-        exchangeProxyAddressForAsset
-      );
-      const erc721ApprovedAddressForIdPromise = erc721.getApproved(
-        asset.tokenId
-      );
+      const erc721ApprovalForAllPromise = publicClient.readContract({
+        address: asset.tokenAddress as `0x${string}`,
+        functionName: 'isApprovedForAll',
+        abi: erc721Abi,
+        args: [walletAddress, exchangeProxyAddressForAsset],
+      });
+      const erc721ApprovedAddressForIdPromise = publicClient.readContract({
+        address: asset.tokenAddress as `0x${string}`,
+        functionName: 'getApproved',
+        abi: erc721Abi,
+        args: [BigInt(asset.tokenId)],
+      });
+
       const [erc721ApprovalForAll, erc721ApprovedAddressForId] =
         await Promise.all([
           erc721ApprovalForAllPromise,
@@ -252,11 +247,13 @@ export const getApprovalStatus = async (
         tokenIdApproved: tokenIdApproved,
       };
     case 'ERC1155':
-      const erc1155 = ERC1155__factory.connect(asset.tokenAddress, provider);
-      const erc1155ApprovalForAll = await erc1155.isApprovedForAll(
-        walletAddress,
-        exchangeProxyAddressForAsset
-      );
+      const erc1155ApprovalForAll = await publicClient.readContract({
+        address: asset.tokenAddress as `0x${string}`,
+        functionName: 'isApprovedForAll',
+        abi: erc1155Abi,
+        args: [walletAddress, exchangeProxyAddressForAsset],
+      });
+
       return {
         contractApproved: erc1155ApprovalForAll ?? false,
       };
@@ -273,70 +270,70 @@ export const getApprovalStatus = async (
  * @returns
  */
 export const approveAsset = async (
-  exchangeProxyAddressForAsset: string,
+  exchangeProxyAddressForAsset: `0x${string}`,
   asset: SwappableAssetV4,
-  signer: Signer,
+  walletClient: WalletClient,
   txOverrides: Partial<TransactionOverrides> = {},
-  approvalOrderrides?: Partial<ApprovalOverrides>
-): Promise<ContractTransaction> => {
-  const approve = approvalOrderrides?.approve ?? true;
+  approvalOverrides?: Partial<ApprovalOverrides>
+) => {
+  const approve = approvalOverrides?.approve ?? true;
 
   switch (asset.type) {
     case 'ERC20':
-      const erc20 = ERC20__factory.connect(asset.tokenAddress, signer);
-      const approvalAmount = approvalOrderrides?.approvalAmount ?? MAX_APPROVAL;
-      const erc20ApprovalTxPromise = erc20.approve(
-        exchangeProxyAddressForAsset,
-        approve ? approvalAmount.toString() : 0,
-        {
-          ...txOverrides,
-        }
+      const approvalAmount = BigInt(
+        approvalOverrides?.approvalAmount ?? MAX_APPROVAL
       );
-      return erc20ApprovalTxPromise;
+      return walletClient.writeContract({
+        address: asset.tokenAddress as `0x${string}`,
+        functionName: 'approve',
+        abi: erc20Abi,
+        args: [exchangeProxyAddressForAsset, approve ? approvalAmount : 0n],
+        chain: walletClient.chain,
+        account: walletClient.account || zeroAddress,
+        ...txOverrides,
+      } as any);
     case 'ERC721':
-      const erc721 = ERC721__factory.connect(asset.tokenAddress, signer);
       // If consumer prefers only to approve the tokenId, only approve tokenId
-      if (approvalOrderrides?.approvalOnlyTokenIdIfErc721) {
-        const erc721ApprovalForOnlyTokenId = erc721.approve(
-          exchangeProxyAddressForAsset,
-          asset.tokenId,
-          {
-            ...txOverrides,
-          }
-        );
-        return erc721ApprovalForOnlyTokenId;
+      if (approvalOverrides?.approvalOnlyTokenIdIfErc721) {
+        return walletClient.writeContract({
+          address: asset.tokenAddress as `0x${string}`,
+          functionName: 'approve',
+          abi: erc721Abi,
+          args: [exchangeProxyAddressForAsset, BigInt(asset.tokenId)],
+          chain: walletClient.chain,
+          account: walletClient.account || zeroAddress,
+          ...txOverrides,
+        } as any);
       }
       // Otherwise default to approving entire contract
-      const erc721ApprovalForAllPromise = erc721.setApprovalForAll(
-        exchangeProxyAddressForAsset,
-        approve,
-        {
-          ...txOverrides,
-        }
-      );
-      return erc721ApprovalForAllPromise;
+      return walletClient.writeContract({
+        address: asset.tokenAddress as `0x${string}`,
+        functionName: 'setApprovalForAll',
+        abi: erc721Abi,
+        args: [exchangeProxyAddressForAsset, approve],
+        chain: walletClient.chain,
+        account: walletClient.account || zeroAddress,
+        ...txOverrides,
+      } as any);
     case 'ERC1155':
-      const erc1155 = ERC1155__factory.connect(asset.tokenAddress, signer);
       // ERC1155s can only approval all
-      const erc1155ApprovalForAll = await erc1155.setApprovalForAll(
-        exchangeProxyAddressForAsset,
-        approve,
-        {
-          ...txOverrides,
-        }
-      );
-      return erc1155ApprovalForAll;
+      return walletClient.writeContract({
+        address: asset.tokenAddress as `0x${string}`,
+        functionName: 'setApprovalForAll',
+        abi: erc1155Abi,
+        args: [exchangeProxyAddressForAsset, approve],
+        chain: walletClient.chain,
+        account: walletClient.account || zeroAddress,
+        ...txOverrides,
+      } as any);
     default:
       throw new UnexpectedAssetTypeError((asset as any).type);
   }
 };
 
 // Parse a hex signature returned by an RPC call into an `ECSignature`.
-export function parseRawSignature(rawSignature: string): ECSignature {
-  const hexSize = hexDataLength(rawSignature);
-  // if (hexUtils.size(rpcSig) !== 65) {
-  //     throw new Error(`Invalid RPC signature length: "${rpcSig}"`);
-  // }
+export function parseRawSignature(rawSignature: `0x${string}`): ECSignature {
+  const hexSize = hexToBytes(rawSignature).length;
   if (hexSize !== 65) {
     throw new Error(
       `Invalid signature length, expected 65, got ${hexSize}.\n"Raw signature: ${rawSignature}"`
@@ -353,10 +350,8 @@ export function parseRawSignature(rawSignature: string): ECSignature {
     // Format is R,S,V
     v = v >= 27 ? v : v + 27;
     return {
-      // r: hexDataSlice.slice(rpcSig, 0, 32),
-      // s: hexUtils.slice(rpcSig, 32, 64),
-      r: hexDataSlice(rawSignature, 0, 32),
-      s: hexDataSlice(rawSignature, 32, 64),
+      r: slice(rawSignature, 0, 32),
+      s: slice(rawSignature, 32, 64),
       v,
     };
   }
@@ -371,12 +366,12 @@ export function parseRawSignature(rawSignature: string): ECSignature {
   v = v >= 27 ? v : v + 27;
   return {
     v,
-    r: hexDataSlice(rawSignature, 1, 33),
-    s: hexDataSlice(rawSignature, 33, 65),
+    r: slice(rawSignature, 1, 33),
+    s: slice(rawSignature, 33, 65),
   };
 }
 
-export const INFINITE_EXPIRATION_TIMESTAMP_SEC = BigNumber.from(2524604400);
+export const INFINITE_EXPIRATION_TIMESTAMP_SEC = BigInt(2524604400);
 
 export const generateErc721Order = async (
   nft: UserFacingERC721AssetDataSerializedV4,
@@ -397,12 +392,12 @@ export const generateErc721Order = async (
     }
   }
   const erc721Order: ERC721OrderStructSerialized = {
-    erc721Token: nft.tokenAddress.toLowerCase(),
+    erc721Token: nft.tokenAddress.toLowerCase() as `0x${string}`,
     erc721TokenId: nft.tokenId,
     direction: parseInt(orderData.direction.toString()), // KLUDGE(johnrjj) - There's some footgun here when only doing orderData.direction.toString(), need to parseInt it
-    erc20Token: erc20.tokenAddress.toLowerCase(),
+    erc20Token: erc20.tokenAddress.toLowerCase() as `0x${string}`,
     erc20TokenAmount: erc20.amount,
-    maker: orderData.maker.toLowerCase(),
+    maker: orderData.maker.toLowerCase() as `0x${string}`,
     // Defaults not required...
     erc721TokenProperties:
       orderData.tokenProperties?.map((property) => ({
@@ -419,7 +414,7 @@ export const generateErc721Order = async (
       }) ?? [],
     expiry: expiry,
     nonce: orderData.nonce?.toString() ?? (await generateRandomV4OrderNonce()),
-    taker: orderData.taker?.toLowerCase() ?? NULL_ADDRESS,
+    taker: (orderData.taker?.toLowerCase() ?? NULL_ADDRESS) as `0x${string}`,
   };
 
   return erc721Order;
@@ -444,17 +439,17 @@ export const generateErc1155Order = async (
     }
   }
   const erc1155Order: ERC1155OrderStructSerialized = {
-    erc1155Token: nft.tokenAddress.toLowerCase(),
+    erc1155Token: nft.tokenAddress.toLowerCase() as `0x${string}`,
     erc1155TokenId: nft.tokenId,
     erc1155TokenAmount: nft.amount ?? '1',
     direction: parseInt(orderData.direction.toString(10)), // KLUDGE(johnrjj) - There's some footgun here when only doing orderData.direction.toString(), need to parseInt it
-    erc20Token: erc20.tokenAddress.toLowerCase(),
+    erc20Token: erc20.tokenAddress.toLowerCase() as `0x${string}`,
     erc20TokenAmount: erc20.amount,
-    maker: orderData.maker.toLowerCase(),
+    maker: orderData.maker.toLowerCase() as `0x${string}`,
     // Defaults not required...
     erc1155TokenProperties:
       orderData.tokenProperties?.map((property) => ({
-        propertyData: property.propertyData.toString(),
+        propertyData: property.propertyData.toString() as `0x${string}`,
         propertyValidator: property.propertyValidator,
       })) ?? [],
     fees:
@@ -467,7 +462,7 @@ export const generateErc1155Order = async (
       }) ?? [],
     expiry: expiry,
     nonce: orderData.nonce?.toString() ?? (await generateRandomV4OrderNonce()),
-    taker: orderData.taker?.toLowerCase() ?? NULL_ADDRESS,
+    taker: (orderData.taker?.toLowerCase() ?? NULL_ADDRESS) as `0x${string}`,
   };
 
   return erc1155Order;

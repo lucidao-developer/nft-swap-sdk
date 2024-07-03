@@ -262,13 +262,12 @@ const App = () => {
   - Binance Smart Chain (56)
   - Avalanche (43114)
 
-
-
 - Are there any protocol fees to execute swaps?
 
   - No
 
 - How do I get the user's `signer` object?
+
   - Generally you can get it from the user's web3 wallet provider, by something like this: `provider.getSigner()`.
   - See this [ethers guide](https://docs.ethers.io/v4/cookbook-providers.html#metamask) (control-f for `getSigner`).
   - In web3-react you can do:

@@ -1,12 +1,10 @@
-import type { Signer } from '@ethersproject/abstract-signer';
-import type { BigNumber, BigNumberish } from '@ethersproject/bignumber';
-import type { BytesLike } from '@ethersproject/bytes';
-import type { IZeroEx } from '../../contracts';
+import { WalletClient } from 'viem';
+import { Numberish } from '../../utils/eth';
 
 export type FeeStruct = {
-  recipient: string;
-  amount: BigNumberish;
-  feeData: string | Array<number>;
+  recipient: `0x${string}`;
+  amount: bigint;
+  feeData: `0x${string}`;
 };
 
 export type FeeStructSerialized = {
@@ -16,110 +14,108 @@ export type FeeStructSerialized = {
 };
 
 export type PropertyStruct = {
-  propertyValidator: string;
-  propertyData: string | Array<number>;
+  propertyValidator: `0x${string}`;
+  propertyData: `0x${string}`;
 };
 
 export type PropertyStructSerialized = {
-  propertyValidator: string;
-  propertyData: string | Array<number>;
+  propertyValidator: `0x${string}`;
+  propertyData: `0x${string}`;
 };
 
 export type ERC1155OrderStruct = {
-  direction: BigNumberish;
-  maker: string;
-  taker: string;
-  expiry: BigNumberish;
-  nonce: BigNumberish;
-  erc20Token: string;
-  erc20TokenAmount: BigNumberish;
+  direction: number;
+  maker: `0x${string}`;
+  taker: `0x${string}`;
+  expiry: bigint;
+  nonce: bigint;
+  erc20Token: `0x${string}`;
+  erc20TokenAmount: bigint;
   fees: FeeStruct[];
-  erc1155Token: string;
-  erc1155TokenId: BigNumberish;
+  erc1155Token: `0x${string}`;
+  erc1155TokenId: bigint;
   erc1155TokenProperties: PropertyStruct[];
-  erc1155TokenAmount: BigNumberish;
+  erc1155TokenAmount: bigint;
 };
 
 export type ERC1155OrderStructSerialized = {
   direction: number;
-  maker: string;
-  taker: string;
+  maker: `0x${string}`;
+  taker: `0x${string}`;
   expiry: string;
   nonce: string;
-  erc20Token: string;
+  erc20Token: `0x${string}`;
   erc20TokenAmount: string;
   fees: FeeStructSerialized[];
-  erc1155Token: string;
+  erc1155Token: `0x${string}`;
   erc1155TokenId: string;
   erc1155TokenProperties: PropertyStructSerialized[];
   erc1155TokenAmount: string;
 };
 
 export type ERC721OrderStruct = {
-  direction: BigNumberish;
-  maker: string;
-  taker: string;
-  expiry: BigNumberish;
-  nonce: BigNumberish;
-  erc20Token: string;
-  erc20TokenAmount: BigNumberish;
+  direction: number;
+  maker: `0x${string}`;
+  taker: `0x${string}`;
+  expiry: bigint;
+  nonce: bigint;
+  erc20Token: `0x${string}`;
+  erc20TokenAmount: bigint;
   fees: FeeStruct[];
-  erc721Token: string;
-  erc721TokenId: BigNumberish;
+  erc721Token: `0x${string}`;
+  erc721TokenId: bigint;
   erc721TokenProperties: PropertyStruct[];
 };
 
 export type ERC721OrderStructSerialized = {
   direction: number;
-  maker: string;
-  taker: string;
+  maker: `0x${string}`;
+  taker: `0x${string}`;
   expiry: string;
   nonce: string;
-  erc20Token: string;
+  erc20Token: `0x${string}`;
   erc20TokenAmount: string;
   fees: FeeStructSerialized[];
-  erc721Token: string;
+  erc721Token: `0x${string}`;
   erc721TokenId: string;
   erc721TokenProperties: PropertyStructSerialized[];
 };
 
 export type UserFacingFeeStruct = {
   recipient: string;
-  amount: BigNumberish;
-  // Make fee data optional for devx (most folks don't use the feeData arg and it _needs_ to be '0x' if not being used).
-  // automatically defaults to '0x'
-  feeData?: BytesLike;
+  amount: Numberish;
+  feeData?: string;
 };
 
 export interface OrderStructOptionsCommon {
-  direction: BigNumberish;
+  direction: Numberish;
   maker: string;
   taker: string;
   appId: string;
   expiry: Date | number | string;
-  nonce: BigNumberish;
+  nonce: Numberish;
   // erc20Token: string;
-  // erc20TokenAmount: BigNumberish;
+  // erc20TokenAmount: Numberish;
   fees: UserFacingFeeStruct[];
   tokenProperties: PropertyStruct[];
 }
 
 export interface OrderStructOptionsCommonStrict {
-  direction: BigNumberish;
+  direction: Numberish;
   // erc20Token: string;
-  // erc20TokenAmount: BigNumberish;
+  // erc20TokenAmount: Numberish;
   maker: string;
   appId?: string;
   taker?: string;
   expiry?: Date | number | string;
-  nonce?: BigNumberish;
+  nonce?: Numberish;
   fees?: UserFacingFeeStruct[];
   tokenProperties?: PropertyStruct[];
 }
 
 export interface Fee {
   recipient: string;
-  amount: BigNumber;
+  amount: bigint;
   feeData: string;
 }
 
@@ -162,37 +158,36 @@ export type SignedNftOrderV4Serialized =
 
 export type ECSignature = {
   v: number;
-  r: string;
-  s: string;
+  r: `0x${string}`;
+  s: `0x${string}`;
 };
 
 export type SignatureStruct = {
   signatureType: number; // 2 for EIP-712, 4 for PRESIGNED
   v: number;
-  r: string;
-  s: string;
+  r: `0x${string}`;
+  s: `0x${string}`;
 };
 
 export type SignatureStructSerialized = {
   signatureType: number; // 2 for EIP-712, 4 for PRESIGNED
   v: number;
-  r: string;
-  s: string;
+  r: `0x${string}`;
+  s: `0x${string}`;
 };
 
 export interface ApprovalOverrides {
-  signer: Signer;
+  walletClient: WalletClient;
   approve: boolean;
   approvalOnlyTokenIdIfErc721: boolean;
-  exchangeContractAddress: string;
+  exchangeContractAddress: `0x${string}`;
   chainId: number;
-  approvalAmount: BigNumberish;
+  approvalAmount: Numberish;
 }
 
 export interface FillOrderOverrides {
-  signer: Signer;
-  exchangeContract: IZeroEx;
-  tokenIdToSellForCollectionOrder?: BigNumberish;
+  walletClient: WalletClient;
+  tokenIdToSellForCollectionOrder?: bigint;
   /**
    * Fill order with native token if possible
    * e.g. If taker asset is WETH, allows order to be filled with ETH
@@ -201,11 +196,11 @@ export interface FillOrderOverrides {
 }
 
 export interface BuildOrderAdditionalConfig {
-  direction: BigNumberish;
+  direction: Numberish;
   maker: string;
   taker: string;
-  expiry: BigNumberish;
-  nonce: BigNumberish;
+  expiry: Numberish;
+  nonce: Numberish;
 }
 
 export type AvailableSignatureTypesV4 = 'eoa' | 'eip1271';
@@ -217,8 +212,8 @@ export interface SigningOptionsV4 {
 
 // Typings for addresses.json file
 export interface AddressesForChainV4 {
-  exchange: string;
-  wrappedNativeToken: string;
+  exchange: `0x${string}`;
+  wrappedNativeToken: `0x${string}`;
 }
 
 // User facing
