@@ -41,7 +41,7 @@
   },
   "dependencies": {
     "date-fns": "^2.30.0",
-    "isomorphic-unfetch": "^4.0.2",
+    "isomorphic-unfetch": "^3.1.0",
     "lodash": "^4.17.21",
     "lodash-es": "^4.17.21",
     "query-string": "^7.1.1",
