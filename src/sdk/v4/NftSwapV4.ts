@@ -743,8 +743,8 @@ class NftSwapV4 implements INftSwapV4 {
           ...order,
           signature: {
             signatureType: 4,
-            r: '0x' as `0x${string}`,
-            s: '0x' as `0x${string}`,
+            r: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
+            s: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
             v: 0,
           },
         };
